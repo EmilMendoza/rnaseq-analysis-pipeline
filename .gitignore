@@ -1,0 +1,12 @@
+.Rhistory
+.RData
+.Rproj.user/
+
+*.html
+*.pdf
+
+*.log
+
+results_rnaseq/
+
+.DS_Store
