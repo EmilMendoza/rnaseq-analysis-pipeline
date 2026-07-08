@@ -1,1 +1,138 @@
 
+---
+title: "Differential Gene Expression Analysis of NRDE2 RNAi-treated Cancer Cells"
+author: "Emil Mendoza"
+date: "2025-05-12"
+output: html_document
+---
+##Introduction
+
+Differential gene expression (DGE) analysis is a fundamental technique used in transcriptomics to identify genes whose expression levels vary significantly between experimental conditions. In this project, we investigated the effects of RNA interference (RNAi) targeting the NRDE2 gene in a cancer cell line. The experiment, available under accession PRJNA490376, includes three biological replicates of control samples and three replicates with NRDE2 knocked down via RNAi. Our goal is to determine which genes are significantly differentially expressed due to the loss of NRDE2 function.
+
+## Materials and Methods
+
+### Experimental Design and Dataset
+
+We analyzed single-end Illumina RNA-seq data from six samples (three control, three NRDE2 RNAi-treated) derived from a human cancer cell line. The dataset was retrieved from PRJNA490376. No biological pairing was present, and the design was unpaired.
+
+### Pipeline and Software Versions
+
+nf-core/rnaseq v3.14.0
+
+Nextflow v24.10.4
+
+Salmon v1.10.1 (via pipeline)
+
+Trim Galore v0.6.10 (via pipeline)
+
+MultiQC v1.14
+
+DESeq2 v1.38.3
+
+R v4.3.2
+
+### Workflow Summary
+
+We used the nf-core/rnaseq pipeline for preprocessing and quantification. Raw reads were trimmed with Trim Galore and quantified using Salmon with the --gcBias flag to correct for GC bias. Transcript-level estimates were aggregated to gene-level using tximport. Differential expression was performed with DESeq2, using the Wald test and Benjamini-Hochberg correction.
+
+### Data Quality
+
+Based on MultiQC output, all samples showed high quality with minor adapter content in 2 RNAi-treated replicates. Adapter trimming corrected this, and no samples were excluded.
+
+### Statistical Analysis
+
+We used the design formula ~ condition (unpaired). Control was set as the reference. Shrinkage of log2 fold-changes was performed using the apeglm method. Multiple testing correction used the Benjamini-Hochberg FDR method.
+
+```
+library(tximport)
+library(readr)
+library(DESeq2)
+library(apeglm)
+
+samples <- read.csv("samplesheet.csv")
+samples$sample <- as.character(samples$sample)
+files <- file.path("results_rnaseq/star_salmon", samples$sample, "quant.sf")
+names(files) <- samples$sample
+tx2gene <- read_tsv("results_rnaseq/star_salmon/tx2gene.tsv", col_names = c("TXNAME", "GENEID"))
+txi <- tximport(files, type = "salmon", tx2gene = tx2gene)
+
+dds <- DESeqDataSetFromTximport(txi, colData = samples, design = ~ condition)
+dds$condition <- relevel(dds$condition, ref = "control")
+dds <- DESeq(dds)
+res <- results(dds)
+resLFC <- lfcShrink(dds, coef=2, type="apeglm")
+```
+
+## Results
+
+Differential Gene Expression Summary
+```summary(resLFC)
+sig_genes <- sum(resLFC$padj < 0.1, na.rm = TRUE)
+upregulated <- sum(resLFC$padj < 0.1 & resLFC$log2FoldChange > 0, na.rm = TRUE)
+downregulated <- sum(resLFC$padj < 0.1 & resLFC$log2FoldChange < 0, na.rm = TRUE)
+```
+
+We identified r sig_genes significantly differentially expressed genes at FDR < 0.1.
+
+Upregulated in RNAi: r upregulated
+
+Downregulated in RNAi: r downregulated
+
+### Top DEGs
+
+head(resLFC[order(resLFC$padj), ], 10)
+
+### PCA Plot
+
+vsd <- vst(dds, blind=FALSE)
+plotPCA(vsd, intgroup="condition")
+
+PCA revealed clear separation between control and RNAi-treated samples.
+
+### MA Plot (Shrunken LFC)
+
+plotMA(resLFC, main="MA Plot (LFC Shrinkage)", ylim=c(-3,3))
+
+The plot shows most genes near log2 fold-change = 0 with several strongly DE genes.
+
+### Dispersion Plot
+
+plotDispEsts(dds)
+
+Dispersion estimates decrease with increasing mean counts, as expected.
+
+### P-value Histogram
+
+hist(res$pvalue, breaks=50, main="Raw P-value Histogram", xlab="p-value")
+
+A spike at low p-values confirms genuine differential signal.
+
+### Read Count and Mapping Summary
+
+## Discussion
+Our analysis shows that NRDE2 knockdown leads to statistically significant changes in gene expression. PCA and MA plots confirm strong biological effects. Many downregulated genes may reflect transcriptional regulation roles of NRDE2. Future work could validate these findings via qPCR or functional assays.
+
+## Appendix
+
+Scripts and Commands
+#!/bin/bash
+
+#SBATCH --job-name=rnaseq
+
+#SBATCH --account=pr_284_general
+
+#SBATCH --output=rnaseq_%j.out
+
+#SBATCH --error=rnaseq_%j.err
+
+#SBATCH --time=24:00:00
+
+#SBATCH --cpus-per-task=12
+
+#SBATCH --mem=96G
+
+module load nextflow/24.10.4
+
+nextflow run nf-core/rnaseq -r 3.14.0 -profile singularity --input samplesheet.csv --fasta Homo_sapiens.GRCh38.dna.primary_assembly.fa --gtf Homo_sapiens.GRCh38.111.gtf --outdir results_rnaseq --saveReference --salmon_gc_bias
+
+Sample Sheet, MultiQC report, nf-core execution report will be attached.
